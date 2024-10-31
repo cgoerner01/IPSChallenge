@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>QR Code Scanner</title>
+    <style>
+        #video {
+            width: 100%;
+            max-width: 500px;
+            height: auto;
+        }
+        #canvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>QR Code Scanner</h1>
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+    <button id="open-webcam" onclick="openWebcam()">Open the webcam</button>
+    <p id="output">Scan a QR code to see the result here...</p>
+    <p>Or enter a link to the FHIR IPS Patient resource</p>
+    <input id="input" type="text" value="https://ips-challenge.it.hs-heilbronn.de/fhir/Patient/UC4-Patient"><br>
+    <button onclick="submitFHIRServerURL()">Submit</button>
+
+    <!-- Include jsQR library -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script>
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const output = document.getElementById("output");
+        var fhir_server_url = "";
+        let patient_id;
+        let stream; // Store the stream globally
+
+        function openWebcam() {
+            // Access webcam
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(userStream => {
+                    stream = userStream; // Store the stream
+                    video.srcObject = stream;
+                    video.play();
+                    requestAnimationFrame(scan);
+                })
+                .catch(err => {
+                    console.error("Error accessing webcam: " + err);
+                });
+            
+            // Add button to close webcam
+            const close_webcam_button = document.createElement("button");
+            close_webcam_button.textContent = "Close Webcam";
+            close_webcam_button.onclick = closeWebcam;
+            close_webcam_button.id = "close-webcam";
+            document.body.appendChild(close_webcam_button);
+
+            function scan() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const code = jsQR(imageData.data, canvas.width, canvas.height, {
+                        inversionAttempts: "dontInvert",
+                    });
+
+                    if (code) {
+                        output.textContent = `QR Code Data: ${code.data}`;
+                        if (code.data != fhir_server_url) {
+                            fhir_server_url = code.data;
+                            console.log("checking for valid patient resource");
+                            checkIfValidFHIRServer(code.data);
+                            /*
+                            checkIfValidFHIRServer(code.data).then(isValid => {
+                                if (isValid) {
+                                    const patient_detail_button = document.createElement("button");
+                                    patient_detail_button.textContent = "View Patient Records";
+                                    patient_detail_button.onclick = redirectToPatientDetails;
+                                    document.body.appendChild(patient_detail_button);
+                                }
+                            });
+                            */
+                        }
+                    }
+                }
+                requestAnimationFrame(scan);
+            }
+        }
+
+        function closeWebcam() {
+            const close_webcam_button = document.getElementById("close-webcam");
+            document.body.removeChild(close_webcam_button);
+
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop()); // Stop all video tracks
+                video.srcObject = null; // Remove the stream from the video element
+            }
+        }
+
+        function submitFHIRServerURL() {
+            const input = document.getElementById("input");
+            fhir_server_url = input.value;
+            checkIfValidFHIRServer(input.value);
+        }
+
+        function checkIfValidFHIRServer(url) {
+            return fetch(url, { redirect: 'follow' })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (Boolean(data.id)) {
+                        const patient_detail_button = document.createElement("button");
+                        patient_detail_button.textContent = "View Patient Records";
+                        patient_detail_button.onclick = redirectToPatientDetails;
+                        document.body.appendChild(patient_detail_button);
+                    }
+                    console.log(data.id);
+                    return Boolean(data.id);
+                })
+                .catch(error => {
+                    console.error('There was a problem with the fetch operation:', error);
+                    return false;
+                });
+        }
+
+        function redirectToPatientDetails() {
+            const url = `patient_details.html?fhir_server_url=${encodeURIComponent(fhir_server_url)}`;
+            window.location.href = url;
+        }
+    </script>
+</body>
+</html>
